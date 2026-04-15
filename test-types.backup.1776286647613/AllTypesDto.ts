@@ -1,0 +1,34 @@
+export interface AllTypesDto {
+  intField: number;
+  longField: number;
+  doubleField: number;
+  floatField: number;
+  booleanField: boolean;
+  byteField: number;
+  shortField: number;
+  charField: string;
+  integerField?: number;
+  longWrapperField?: number;
+  doubleWrapperField?: number;
+  floatWrapperField?: number;
+  booleanWrapperField?: boolean;
+  byteWrapperField?: number;
+  shortWrapperField?: number;
+  characterField?: string;
+  stringField?: string;
+  bigDecimalField?: number;
+  bigIntegerField?: number;
+  uuidField?: string;
+  localDateField?: string;
+  localDateTimeField?: string;
+  localTimeField?: string;
+  dateField?: string;
+  instantField?: string;
+  zonedDateTimeField?: string;
+  stringList?: string[];
+  integerSet?: number[];
+  stringObjectMap?: Record<string, unknown>;
+  stringArray?: string[];
+  optionalString?: string | null;
+  optionalDateTime?: string | null;
+}
