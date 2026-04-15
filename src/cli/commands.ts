@@ -13,6 +13,9 @@ export interface SyncOptions {
   config?: string;
   check?: boolean;
   failOnBreaking?: boolean;
+  dryRun?: boolean;  // 🆕
+  backup?: boolean;  // 🆕
+  safe?: boolean;    // 🆕
 }
 
 function loadConfig(): Partial<SyncOptions> {
@@ -30,11 +33,9 @@ function loadConfig(): Partial<SyncOptions> {
 export async function sync(options: SyncOptions): Promise<void> {
   const config = loadConfig();
   
-  // Resolve paths relative to current working directory
   let backendPath = options.backend || config.backend || './backend/src/main/java';
   let frontendPath = options.frontend || config.frontend || './src/types';
   
-  // Resolve to absolute paths
   backendPath = path.resolve(process.cwd(), backendPath);
   if (frontendPath) {
     frontendPath = path.resolve(process.cwd(), frontendPath);
@@ -42,6 +43,13 @@ export async function sync(options: SyncOptions): Promise<void> {
   
   const checkOnly = options.check || false;
   const failOnBreaking = options.failOnBreaking || config.failOnBreaking || false;
+  const dryRun = options.dryRun || false;
+  const backup = options.backup || false;
+  const safe = options.safe || false;
+  
+  if (dryRun) {
+    logger.info('🔍 DRY RUN - No files will be written');
+  }
   
   if (!checkOnly && frontendPath) {
     logger.info(`   Backend: ${backendPath}`);
@@ -69,22 +77,58 @@ export async function sync(options: SyncOptions): Promise<void> {
       JSON.stringify(parsed, null, 2)
     );
     
-    // Check for breaking changes
     const baselinePath = path.join(outputDir, 'baseline.json');
     const diff = await checkBreakingChanges({
       parsed,
       baselinePath,
       failOnBreaking,
-      updateBaseline: !checkOnly,
+      updateBaseline: !checkOnly && !dryRun,
     });
     
-    // Generate TypeScript (skip if check-only or no frontend path)
+    // Safe mode - abort if breaking changes
+    if (safe && diff.hasBreakingChanges) {
+      logger.error('❌ Breaking changes detected. Aborting due to --safe flag.');
+      logger.info('   Use --dry-run to see what would change, or run without --safe to proceed anyway.');
+      process.exit(EXIT_CODES.BREAKING_CHANGE);
+    }
+    
+    // Backup existing types
+    if (backup && !checkOnly && frontendPath && !dryRun) {
+      if (fs.existsSync(frontendPath)) {
+        const backupPath = `${frontendPath}.backup.${Date.now()}`;
+        logger.info(`💾 Backing up existing types to ${backupPath}`);
+        fs.cpSync(frontendPath, backupPath, { recursive: true });
+      }
+    }
+    
+    // Generate TypeScript
     if (!checkOnly && frontendPath) {
-      await generateTypeScript({
-        outputPath: frontendPath,
-        parsed,
-      });
-      logger.success('✨ Done!');
+      if (dryRun) {
+        // Dry run - show what WOULD be generated
+        logger.info('');
+        logger.info('📋 Files that would be generated:');
+        logger.info(`   Output directory: ${frontendPath}`);
+        logger.info(`   Total files: ${parsed.classes.length + parsed.enums.length + 1}`);
+        logger.info('');
+        logger.info('   Classes:');
+        for (const dto of parsed.classes) {
+          logger.info(`     • ${dto.className}.ts`);
+        }
+        logger.info('');
+        logger.info('   Enums:');
+        for (const enumDto of parsed.enums) {
+          logger.info(`     • ${enumDto.className}.ts`);
+        }
+        logger.info('     • index.ts');
+        logger.info('');
+        logger.info('✨ Dry run complete. No files were written.');
+      } else {
+        await generateTypeScript({
+          outputPath: frontendPath,
+          parsed,
+        });
+        logger.success('✨ Done!');
+      }
     }
     
     if (failOnBreaking && diff.hasBreakingChanges) {
