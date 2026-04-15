@@ -1,0 +1,50 @@
+{
+  "name": "spring2ts",
+  "version": "0.1.0",
+  "description": "Zero-config sync between Spring Boot DTOs and TypeScript types",
+  "main": "dist/index.js",
+  "bin": {
+    "spring2ts": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "test": "vitest",
+    "test:coverage": "vitest --coverage",
+    "lint": "eslint src tests",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "verify": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "spring-boot",
+    "typescript",
+    "dto",
+    "code-generation",
+    "api-contract"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^5.6.2",
+    "commander": "^14.0.3",
+    "glob": "^13.0.6",
+    "java-ast": "^0.4.1",
+    "java-parser": "^3.0.1",
+    "prettier": "^3.8.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@typescript-eslint/eslint-plugin": "^8.58.2",
+    "@typescript-eslint/parser": "^8.58.2",
+    "@vitest/coverage-v8": "^4.1.4",
+    "eslint": "^10.2.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.4"
+  },
+  "directories": {
+    "test": "tests"
+  },
+  "types": "./dist/index.d.ts"
+}
