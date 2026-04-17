@@ -11,9 +11,9 @@ const program = new Command();
 program
   .name('spring2ts')
   .description('Zero-config sync between Spring Boot DTOs and TypeScript types')
-  .version('0.3.0');  // ✅ Updated version
+  .version('0.3.0');
 
-// 🔥 spring2ts init
+// spring2ts init
 program
   .command('init')
   .description('Initialize Spring2TS in your project')
@@ -55,7 +55,7 @@ program
     }
   });
 
-// 🔥 spring2ts check
+// spring2ts check
 program
   .command('check')
   .description('Check for breaking changes (exits with code 3 if found)')
@@ -96,7 +96,7 @@ program
     });
   });
 
-// 🔥 spring2ts gen (with new options)
+// spring2ts gen (with --no-merge option)
 program
   .command('gen')
   .description('Generate TypeScript types')
@@ -105,6 +105,7 @@ program
   .option('--dry-run', 'Show what would be generated without writing files')
   .option('--backup', 'Backup existing types before generating')
   .option('--safe', 'Abort if breaking changes detected')
+  .option('--no-merge', 'Disable incremental updates (overwrite all files)')  // ✅ NEW
   .action(async (options) => {
     let backendPath = options.backend;
     let frontendPath = options.frontend;
@@ -138,6 +139,9 @@ program
     if (options.safe) {
       console.log(chalk.yellow('🛡️  Safe mode - will abort if breaking changes detected'));
     }
+    if (!options.merge) {
+      console.log(chalk.yellow('⚠️  Merge disabled - files will be overwritten'));
+    }
     
     console.log(chalk.green('📝 Generating TypeScript types...'));
     
@@ -148,11 +152,12 @@ program
       failOnBreaking: options.safe || false,
       dryRun: options.dryRun || false,
       backup: options.backup || false,
-      safe: options.safe || false
+      safe: options.safe || false,
+      merge: options.merge  
     });
   });
 
-// 🔥 spring2ts sync (accepts breaking changes)
+// spring2ts sync (with --no-merge option)
 program
   .command('sync')
   .description('Generate types and update baseline (accepts breaking changes)')
@@ -160,6 +165,7 @@ program
   .option('-f, --frontend <path>', 'Output path for TypeScript types')
   .option('--dry-run', 'Show what would change without writing files')
   .option('--backup', 'Backup existing types before generating')
+  .option('--no-merge', 'Disable incremental updates (overwrite all files)')  // ✅ NEW
   .action(async (options) => {
     let backendPath = options.backend;
     let frontendPath = options.frontend;
@@ -181,6 +187,9 @@ program
     if (options.dryRun) {
       console.log(chalk.yellow('🔍 DRY RUN - No files will be written'));
     }
+    if (!options.merge) {
+      console.log(chalk.yellow('⚠️  Merge disabled - files will be overwritten'));
+    }
     
     console.log(chalk.green('🔄 Syncing and updating baseline...'));
     
@@ -191,11 +200,12 @@ program
       failOnBreaking: false,
       dryRun: options.dryRun || false,
       backup: options.backup || false,
-      isSyncMode: true  // ✅ ACCEPT BREAKING CHANGES
+      isSyncMode: true,
+      merge: options.merge  
     });
   });
 
-// 🔥 spring2ts validate (NEW COMMAND)
+// spring2ts validate 
 program
   .command('validate')
   .description('Validate generated types against runtime API')
@@ -206,7 +216,7 @@ program
     console.log(chalk.yellow('⚠️  This feature is in development.'));
   });
 
-// 🔥 spring2ts detect (NEW COMMAND)
+// spring2ts detect 
 program
   .command('detect')
   .description('Auto-detect project structure and existing types')

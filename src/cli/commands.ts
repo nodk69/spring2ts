@@ -18,6 +18,7 @@ export interface SyncOptions {
   backup?: boolean;
   safe?: boolean;
   isSyncMode?: boolean;
+  merge?: boolean; 
 }
 
 function loadConfig(): Partial<SyncOptions> {
@@ -46,6 +47,7 @@ export async function sync(options: SyncOptions): Promise<void> {
   const backup = options.backup || false;
   const safe = options.safe || false;
   const isSyncMode = options.isSyncMode || false;
+  const merge = options.merge !== false;  
   
   // === CLEAN OUTPUT ===
   logger.title(`Spring2TS v0.3.0`);
@@ -54,6 +56,7 @@ export async function sync(options: SyncOptions): Promise<void> {
   if (dryRun) logger.kv('Mode:   ', chalk.yellow('DRY RUN'));
   if (safe) logger.kv('Mode:   ', chalk.yellow('SAFE MODE'));
   if (isSyncMode) logger.kv('Mode:   ', chalk.cyan('SYNC (accepting changes)'));
+  if (!merge) logger.kv('Mode:   ', chalk.yellow('OVERWRITE (no merge)'));
   logger.blank();
   
   try {
@@ -98,7 +101,11 @@ export async function sync(options: SyncOptions): Promise<void> {
       if (dryRun) {
         logger.info(`Would generate ${parsed.classes.length + parsed.enums.length + 1} files`);
       } else {
-        await generateTypeScript({ outputPath: frontendPath, parsed });
+        await generateTypeScript({ 
+          outputPath: frontendPath, 
+          parsed,
+          merge  // ✅ Pass merge option
+        });
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
         logger.success(`Generated ${parsed.classes.length + parsed.enums.length + 1} files in ${elapsed}s`);
       }
