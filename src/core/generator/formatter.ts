@@ -1,5 +1,7 @@
 ﻿import * as prettier from 'prettier';
 
+let warningShown = false;
+
 export async function formatTypeScript(code: string): Promise<string> {
   try {
     return await prettier.format(code, {
@@ -10,10 +12,15 @@ export async function formatTypeScript(code: string): Promise<string> {
       trailingComma: 'es5',
     });
   } catch (error) {
-    // Silently return unformatted code - the code is still valid TypeScript
-    // This happens when there are special characters in property names (like hyphens)
-    // which Prettier doesn't handle well but TypeScript accepts with quotes
-    console.warn('⚠️  Formatting skipped (special characters in property names)');
+    // Only show warning ONCE and only in verbose mode
+    if (!warningShown) {
+      const isVerbose = process.argv.includes('--verbose');
+      if (isVerbose) {
+        console.log('   ℹ️  Some files contain special characters (formatting skipped)');
+      }
+      warningShown = true;
+    }
+    // Return unformatted code - it's still valid TypeScript!
     return code;
   }
 }

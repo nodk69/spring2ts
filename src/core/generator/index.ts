@@ -14,33 +14,36 @@ export interface GenerateOptions {
 export async function generateTypeScript(options: GenerateOptions): Promise<void> {
   const { outputPath, parsed } = options;
   
-  logger.step(1, 3, 'Generating TypeScript files...');
+  // ✅ Dedupe classes by name (fixes duplicate TestDto issue)
+  const uniqueClasses = [...new Map(parsed.classes.map(c => [c.className, c])).values()];
+  const uniqueEnums = [...new Map(parsed.enums.map(e => [e.className, e])).values()];
+  const allClasses = [...uniqueClasses, ...uniqueEnums];
   
-  const allClasses = [...parsed.classes, ...parsed.enums];
   const absoluteOutput = path.resolve(outputPath);
-  
   ensureDirectory(absoluteOutput);
   
   let generated = 0;
   
   // Generate enums
-  for (const enumDto of parsed.enums) {
+  for (const enumDto of uniqueEnums) {
     let code = generateEnum(enumDto);
     code = await formatTypeScript(code);
     
     const filePath = path.join(absoluteOutput, `${enumDto.className}.ts`);
     writeFile(filePath, code);
     generated++;
+    logger.debug(`Generated ${enumDto.className}.ts`);
   }
   
   // Generate interfaces
-  for (const dto of parsed.classes) {
+  for (const dto of uniqueClasses) {
     let code = generateInterface(dto, allClasses);
     code = await formatTypeScript(code);
     
     const filePath = path.join(absoluteOutput, `${dto.className}.ts`);
     writeFile(filePath, code);
     generated++;
+    logger.debug(`Generated ${dto.className}.ts`);
   }
   
   // Generate index.ts
@@ -48,7 +51,5 @@ export async function generateTypeScript(options: GenerateOptions): Promise<void
   const formattedIndex = await formatTypeScript(indexCode);
   writeFile(path.join(absoluteOutput, 'index.ts'), formattedIndex);
   generated++;
-  
-  logger.step(2, 3, `Generated ${generated} TypeScript files`);
-  logger.step(3, 3, `Output directory: ${absoluteOutput}`);
+  logger.debug('Generated index.ts');
 }
