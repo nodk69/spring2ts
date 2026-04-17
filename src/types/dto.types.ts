@@ -4,6 +4,8 @@ export interface DTOField {
   name: string;
   jsonName?: string;           // @JsonProperty value
   jsonAliases?: string[];      // @JsonAlias values
+  jsonIgnore?: boolean;        // @JsonIgnore - skip this field
+  jacksonWarnings?: string[];  // Warnings for @JsonSerialize, @JsonFormat, etc.
   javaType: string;
   tsType: string;
   nullable: boolean;
