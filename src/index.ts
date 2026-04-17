@@ -11,7 +11,7 @@ const program = new Command();
 program
   .name('spring2ts')
   .description('Zero-config sync between Spring Boot DTOs and TypeScript types')
-  .version('0.2.0');
+  .version('0.3.0');  // ✅ Updated version
 
 // 🔥 spring2ts init
 program
@@ -23,7 +23,7 @@ program
     const backendPath = options.backend || './backend/src/main/java';
     const frontendPath = options.frontend || './src/types';
     
-    console.log(chalk.green('🚀 Initializing Spring2TS v2...'));
+    console.log(chalk.green('🚀 Initializing Spring2TS v0.3.0...'));
     console.log(chalk.blue(`   Backend: ${backendPath}`));
     console.log(chalk.blue(`   Frontend: ${frontendPath}`));
     
@@ -152,10 +152,10 @@ program
     });
   });
 
-// 🔥 spring2ts sync (with new options)
+// 🔥 spring2ts sync (accepts breaking changes)
 program
   .command('sync')
-  .description('Generate types and update baseline')
+  .description('Generate types and update baseline (accepts breaking changes)')
   .option('-b, --backend <path>', 'Path to backend DTO folder')
   .option('-f, --frontend <path>', 'Output path for TypeScript types')
   .option('--dry-run', 'Show what would change without writing files')
@@ -190,7 +190,8 @@ program
       check: false,
       failOnBreaking: false,
       dryRun: options.dryRun || false,
-      backup: options.backup || false
+      backup: options.backup || false,
+      isSyncMode: true  // ✅ ACCEPT BREAKING CHANGES
     });
   });
 
@@ -199,12 +200,10 @@ program
   .command('validate')
   .description('Validate generated types against runtime API')
   .option('-b, --backend <path>', 'Path to backend DTO folder')
-  .option('-u, --url <url>', 'Base URL of running backend (e.g., http://localhost:8080)')
+  .option('-u, --url <url>', 'Base URL of running backend')
   .action(async (options) => {
     console.log(chalk.cyan('🔍 Validating types against runtime API...'));
     console.log(chalk.yellow('⚠️  This feature is in development.'));
-    console.log(chalk.gray('   Will compare DTOs with actual API responses.'));
-    // TODO: Implement runtime validation
   });
 
 // 🔥 spring2ts detect (NEW COMMAND)
@@ -214,8 +213,6 @@ program
   .action(async () => {
     console.log(chalk.cyan('🔍 Detecting project structure...'));
     console.log(chalk.yellow('⚠️  This feature is in development.'));
-    console.log(chalk.gray('   Will scan for existing TypeScript types and suggest config.'));
-    // TODO: Implement project detection
   });
 
 // Hidden debug command

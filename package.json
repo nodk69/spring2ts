@@ -31,7 +31,9 @@
     "glob": "^13.0.6",
     "java-ast": "^0.4.1",
     "java-parser": "^3.0.1",
-    "prettier": "^3.8.3"
+    "prettier": "^3.8.3",
+    "tree-sitter": "^0.21.1",
+    "tree-sitter-java": "^0.23.5"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",

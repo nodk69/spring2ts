@@ -55,14 +55,19 @@ export function printDiffReport(diff: DiffResult): void {
   console.log(chalk.bold(`Summary: ${breaking.length} breaking, ${warnings.length} warnings, ${safe.length} safe`));
 }
 
-export function printCheckResult(diff: DiffResult): void {
+export function printCheckResult(diff: DiffResult, isSyncMode: boolean = false): void {
   printDiffReport(diff);
   
   if (diff.hasBreakingChanges) {
-    console.log(chalk.red('\n❌ Breaking changes detected! Cannot proceed.'));
-    console.log(chalk.yellow('\n💡 To fix:'));
-    console.log(chalk.gray('   1. Revert the breaking changes, OR'));
-    console.log(chalk.gray('   2. Update frontend to handle new types, then run `spring2ts sync`'));
+    if (isSyncMode) {
+      console.log(chalk.yellow('\n⚠️  Breaking changes detected but accepted in sync mode.'));
+      console.log(chalk.gray('   Baseline will be updated.'));
+    } else {
+      console.log(chalk.red('\n❌ Breaking changes detected! Cannot proceed.'));
+      console.log(chalk.yellow('\n💡 To fix:'));
+      console.log(chalk.gray('   1. Revert the breaking changes, OR'));
+      console.log(chalk.gray('   2. Update frontend to handle new types, then run `spring2ts sync`'));
+    }
   } else {
     console.log(chalk.green('\n✅ No breaking changes detected. Safe to proceed.'));
   }
