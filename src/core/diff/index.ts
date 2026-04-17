@@ -10,10 +10,11 @@ export interface CheckOptions {
   baselinePath: string;
   failOnBreaking: boolean;
   updateBaseline: boolean;
+  isSyncMode?: boolean;
 }
 
 export async function checkBreakingChanges(options: CheckOptions): Promise<DiffResult> {
-  const { parsed, baselinePath, failOnBreaking, updateBaseline } = options;
+  const { parsed, baselinePath, failOnBreaking, updateBaseline, isSyncMode } = options;
   
   const oldSnapshot = loadSnapshot(baselinePath);
   
@@ -41,7 +42,7 @@ export async function checkBreakingChanges(options: CheckOptions): Promise<DiffR
     saveSnapshot(newSnapshot, baselinePath);
   }
   
-  printCheckResult(diff);
+  printCheckResult(diff, isSyncMode);
   
   return diff;
 }

@@ -18,7 +18,7 @@ export interface Change {
   oldValue?: string;
   newValue?: string;
   message: string;
-   filePath?: string;     
+  filePath?: string;
   lineNumber?: number;
 }
 

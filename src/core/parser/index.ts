@@ -3,9 +3,17 @@ import { logger } from '../../utils/logger';
 import { ParsedDTO, DTOClass, ParseOptions } from '../../types/dto.types';
 import { parseJavaFileWithAST } from './ast/tree-sitter-parser';
 import { resolveInheritance } from './ast/resolve-inheritance';
+import * as fs from 'fs';
 
 export async function parseDTOs(options: ParseOptions): Promise<ParsedDTO> {
   const { inputPath, excludePatterns = [] } = options;
+  
+  // ✅ Check if directory exists BEFORE scanning
+  if (!fs.existsSync(inputPath)) {
+    logger.error(`Directory not found: ${inputPath}`);
+    logger.info('Please check the backend path and try again.');
+    process.exit(1);
+  }
   
   logger.step(1, 3, `Scanning for Java files in: ${inputPath}`);
   
@@ -16,6 +24,11 @@ export async function parseDTOs(options: ParseOptions): Promise<ParsedDTO> {
     '**/target/**',
     ...excludePatterns,
   ]);
+  
+  if (javaFiles.length === 0) {
+    logger.warn(`No Java files found in ${inputPath}`);
+    return { classes: [], enums: [] };
+  }
   
   logger.success(`Found ${javaFiles.length} Java files`);
   
