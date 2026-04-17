@@ -1,4 +1,4 @@
-import Parser from 'tree-sitter';
+import Parser, { SyntaxNode } from 'tree-sitter';
 import Java from 'tree-sitter-java';
 import { DTOClass, DTOField } from '../../../types/dto.types';
 import { mapJavaTypeToTS } from '../type-mapper';
@@ -36,7 +36,7 @@ export function parseJavaFileWithAST(
     }
 
     const declarations = root.children.filter(
-      (n) => n.type === 'class_declaration' || n.type === 'enum_declaration'
+      (n: SyntaxNode) => n.type === 'class_declaration' || n.type === 'enum_declaration'
     );
 
     for (const decl of declarations) {
@@ -71,7 +71,7 @@ function extractJsonAliases(fieldText: string): string[] | undefined {
   
   const aliases: string[] = [];
   const aliasRegex = /["']([^"']+)["']/g;
-  let m;
+  let m: RegExpExecArray | null;
   while ((m = aliasRegex.exec(match[0])) !== null) {
     aliases.push(m[1]);
   }
@@ -100,7 +100,7 @@ function getJacksonWarnings(fieldText: string, annotations: string[]): string[] 
 
 /** Extract a regular class */
 function extractClass(
-  node: Parser.SyntaxNode,
+  node: SyntaxNode,
   packageName: string,
   imports: string[],
   filePath: string,
@@ -111,7 +111,7 @@ function extractClass(
   let extendsClass: string | undefined;
   const superclass = node.childForFieldName('superclass');
   if (superclass) {
-    const typeNode = superclass.children.find((c: Parser.SyntaxNode) => c.isNamed);
+    const typeNode = superclass.children.find((c: SyntaxNode) => c.isNamed);
     extendsClass = typeNode ? extractTypeText(typeNode) : undefined;
   }
 
@@ -151,7 +151,7 @@ function extractClass(
 
 /** Extract fields from a field_declaration node */
 function extractFields(
-  fieldNode: Parser.SyntaxNode,
+  fieldNode: SyntaxNode,
   knownClasses: Set<string>
 ): DTOField[] {
   const fields: DTOField[] = [];
@@ -161,7 +161,7 @@ function extractFields(
   let hasNotNull = false;
 
   /** Helper to process any annotation node */
-  const processAnnotation = (node: Parser.SyntaxNode) => {
+  const processAnnotation = (node: SyntaxNode): void => {
     const raw = node.childForFieldName('name')?.text || node.text || '';
     let annName = raw.replace(/^@/, '').split('(')[0].trim();
     
@@ -187,7 +187,7 @@ function extractFields(
     }
   }
 
-  // ✅ Also check inside modifiers node (some parsers put annotations there)
+  // ✅ Also check inside modifiers node
   const modifiersNode = fieldNode.childForFieldName('modifiers');
   if (modifiersNode) {
     for (const mod of modifiersNode.children) {
@@ -197,7 +197,7 @@ function extractFields(
     }
   }
 
-  // ✅ SUPER ROBUST FALLBACK: Raw text scan (catches Lombok @NonNull even if node parsing is quirky)
+  // ✅ SUPER ROBUST FALLBACK: Raw text scan
   if (!hasNotNull) {
     const lowerText = fieldText.toLowerCase();
     if (lowerText.includes('@notnull') || lowerText.includes('@nonnull')) {
@@ -219,7 +219,7 @@ function extractFields(
   const typeNode = fieldNode.childForFieldName('type');
   const javaType = typeNode ? extractTypeText(typeNode) : 'unknown';
 
-  const declarators = fieldNode.children.filter((n) => n.type === 'variable_declarator');
+  const declarators = fieldNode.children.filter((n: SyntaxNode) => n.type === 'variable_declarator');
   for (const decl of declarators) {
     const nameNode = decl.childForFieldName('name');
     const fieldName = nameNode?.text;
@@ -247,7 +247,7 @@ function extractFields(
 
 /** Extract enum */
 function extractEnum(
-  node: Parser.SyntaxNode,
+  node: SyntaxNode,
   packageName: string,
   imports: string[],
   filePath: string
@@ -279,7 +279,7 @@ function extractEnum(
 }
 
 /** Recursively stringify a type node */
-function extractTypeText(node: Parser.SyntaxNode): string {
+function extractTypeText(node: SyntaxNode): string {
   if (!node) return 'unknown';
 
   if (node.type === 'array_type') {
@@ -290,10 +290,10 @@ function extractTypeText(node: Parser.SyntaxNode): string {
 
   if (node.type === 'generic_type') {
     const base = node.childForFieldName('type')?.text || '';
-    const typeArgs = node.children.find((c) => c.type === 'type_arguments');
+    const typeArgs = node.children.find((c: SyntaxNode) => c.type === 'type_arguments');
     if (typeArgs) {
       const args = typeArgs.children
-        .filter((c) => c.isNamed)
+        .filter((c: SyntaxNode) => c.isNamed)
         .map(extractTypeText)
         .join(', ');
       return `${base}<${args}>`;
@@ -301,7 +301,7 @@ function extractTypeText(node: Parser.SyntaxNode): string {
     return base;
   }
 
-  if (['type_identifier', 'scoped_type_identifier'].includes(node.type)) {
+  if (node.type === 'type_identifier' || node.type === 'scoped_type_identifier') {
     return node.text;
   }
 
