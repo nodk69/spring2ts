@@ -1,15 +1,14 @@
 import { findJavaFiles, readJavaFile } from '../../utils/file-utils';
 import { logger } from '../../utils/logger';
 import { ParsedDTO, DTOClass, ParseOptions } from '../../types/dto.types';
-import { extractDTOFromContent, resolveInheritance } from './dto-extractor';
-import { parseJavaFile } from './java-ast';
+import { parseJavaFileWithAST } from './ast/tree-sitter-parser';
+import { resolveInheritance } from './ast/resolve-inheritance';
 
 export async function parseDTOs(options: ParseOptions): Promise<ParsedDTO> {
   const { inputPath, excludePatterns = [] } = options;
   
   logger.step(1, 3, `Scanning for Java files in: ${inputPath}`);
   
-  // Find all Java files
   const javaFiles = await findJavaFiles(inputPath, [
     '**/test/**',
     '**/tests/**',
@@ -22,28 +21,17 @@ export async function parseDTOs(options: ParseOptions): Promise<ParsedDTO> {
   
   const classes: DTOClass[] = [];
   const enums: DTOClass[] = [];
-  
-  // First pass: collect all class names
   const knownClasses = new Set<string>();
   
   logger.step(2, 3, 'Parsing Java files...');
   
-  // Parse all files
+  // ✅ USE TREE-SITTER PARSER (WITH JACKSON SUPPORT!)
   for (const filePath of javaFiles) {
     try {
       const content = readJavaFile(filePath);
+      const dtos = parseJavaFileWithAST(content, filePath, knownClasses);
       
-      // Validate syntax
-      const parseResult = parseJavaFile(content, filePath, knownClasses);
-      if (!parseResult.success) {
-        logger.warn(`Skipping ${filePath}: ${parseResult.error}`);
-        continue;
-      }
-      
-      // Extract DTO
-      const dto = extractDTOFromContent(content, filePath, knownClasses);
-      
-      if (dto) {
+      for (const dto of dtos) {
         knownClasses.add(dto.className);
         
         if (dto.isEnum) {
@@ -57,15 +45,12 @@ export async function parseDTOs(options: ParseOptions): Promise<ParsedDTO> {
     }
   }
   
-  // Resolve inheritance relationships
   resolveInheritance(classes);
   
-  // Second pass: update field types with known enum classes
   logger.step(3, 3, 'Resolving types...');
   
   for (const dto of classes) {
     for (const field of dto.fields) {
-      // Check if field type is an enum
       const baseType = field.javaType.replace(/<[^>]+>/, '').replace('[]', '');
       if (knownClasses.has(baseType)) {
         const isEnumType = enums.some(e => e.className === baseType);
@@ -79,8 +64,5 @@ export async function parseDTOs(options: ParseOptions): Promise<ParsedDTO> {
   
   logger.success(`Parsed ${classes.length} DTOs and ${enums.length} enums`);
   
-  return {
-    classes,
-    enums,
-  };
+  return { classes, enums };
 }
