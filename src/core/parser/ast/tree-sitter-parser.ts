@@ -1,12 +1,134 @@
 import Parser, { SyntaxNode } from 'tree-sitter';
 import Java from 'tree-sitter-java';
-import { DTOClass, DTOField } from '../../../types/dto.types';
-import { mapJavaTypeToTS } from '../type-mapper';
+import { DTOClass } from '../../../types/dto.types';
+import { extractClass } from './extractors/class-extractor';
+import { extractEnum } from './extractors/enum-extractor';
+import { extractRecord } from './extractors/record-extractor';
+import { logger } from '../../../utils/logger';
 
-const isVerbose = process.argv.includes('--verbose');
+// ============================================================================
+// PARSER SETUP
+// ============================================================================
 
 /**
- * Parse Java file using Tree-sitter (reliable modern parser)
+ * Singleton Tree-sitter parser instance.
+ * Reusing a single parser is significantly faster than creating a new one per file.
+ */
+const tsParser = new Parser();
+tsParser.setLanguage(Java);
+
+/**
+ * Verbose logging flag - enables detailed debug output.
+ * Activated via: spring2ts gen --verbose
+ */
+const isVerbose = process.argv.includes('--verbose');
+
+// ============================================================================
+// CONTENT PREPROCESSING
+// ============================================================================
+
+/**
+ * Decode Java unicode escape sequences in source code.
+ * 
+ * Java allows unicode escapes anywhere in the source code, even in comments
+ * and string literals. For example:
+ *   - "na\u006De" becomes "name"
+ *   - "\u0048\u0065\u006C\u006C\u006F" becomes "Hello"
+ * 
+ * This function converts all \uXXXX sequences to their actual characters
+ * BEFORE parsing, ensuring the AST reflects the true source code.
+ * 
+ * @param content - Raw Java source code
+ * @returns Source code with all unicode escapes decoded
+ */
+function decodeUnicodeEscapes(content: string): string {
+  return content.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => {
+    return String.fromCharCode(parseInt(hex, 16));
+  });
+}
+
+/**
+ * Normalize line endings and remove BOM if present.
+ * Ensures consistent parsing across different operating systems.
+ */
+function normalizeContent(content: string): string {
+  // Remove UTF-8 BOM if present (some Windows editors add this)
+  if (content.charCodeAt(0) === 0xFEFF) {
+    content = content.slice(1);
+  }
+  
+  // Normalize line endings to LF
+  return content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
+// ============================================================================
+// PACKAGE AND IMPORT EXTRACTION
+// ============================================================================
+
+/**
+ * Extract package declaration from the root AST node.
+ * 
+ * @example
+ * "package com.example.dto;" → "com.example.dto"
+ */
+function extractPackageName(root: SyntaxNode): string {
+  for (const child of root.children) {
+    if (child.type === 'package_declaration') {
+      return child.text
+        .replace(/^package\s+/, '')
+        .replace(';', '')
+        .trim();
+    }
+  }
+  return '';
+}
+
+/**
+ * Extract all import declarations from the root AST node.
+ * 
+ * @example
+ * "import java.util.List;" → "java.util.List"
+ * "import com.example.dto.*;" → "com.example.dto.*"
+ */
+function extractImports(root: SyntaxNode): string[] {
+  const imports: string[] = [];
+  
+  for (const child of root.children) {
+    if (child.type === 'import_declaration') {
+      const importPath = child.text
+        .replace(/^import\s+/, '')
+        .replace(';', '')
+        .trim();
+      if (importPath) imports.push(importPath);
+    }
+  }
+  
+  return imports;
+}
+
+// ============================================================================
+// MAIN PARSER
+// ============================================================================
+
+/**
+ * Parse a Java file using Tree-sitter and extract DTO information.
+ * 
+ * This is the core parsing function that:
+ * 1. Preprocesses the source (unicode escapes, BOM, line endings)
+ * 2. Parses the file into an AST using Tree-sitter
+ * 3. Extracts package and import information
+ * 4. Finds all class, enum, and record declarations
+ * 5. Delegates to specialized extractors for each declaration type
+ * 
+ * Supported Java constructs:
+ * - ✅ Classes (public class UserDTO { ... })
+ * - ✅ Enums (public enum Status { ... })
+ * - ✅ Records (public record UserRecord(...) { ... }) - Java 14+
+ * 
+ * @param content - Raw Java source code as string
+ * @param filePath - Absolute path to the Java file (for error reporting)
+ * @param knownClasses - Set of already discovered class names (for type resolution)
+ * @returns Array of extracted DTO classes (may be empty if none found)
  */
 export function parseJavaFileWithAST(
   content: string,
@@ -16,294 +138,121 @@ export function parseJavaFileWithAST(
   const dtos: DTOClass[] = [];
 
   try {
-    const parser = new Parser();
-    parser.setLanguage(Java);
-
-    const tree = parser.parse(content);
+    // ========================================================================
+    // PHASE 1: Preprocessing
+    // ========================================================================
+    
+    // Decode unicode escapes BEFORE parsing (e.g., \u006E -> n)
+    content = decodeUnicodeEscapes(content);
+    
+    // Normalize content (BOM removal, line endings)
+    content = normalizeContent(content);
+    
+    // ========================================================================
+    // PHASE 2: Parse into AST
+    // ========================================================================
+    
+    const tree = tsParser.parse(content);
     const root = tree.rootNode;
-
-    let packageName = '';
-    const imports: string[] = [];
-
-    for (const child of root.children) {
-      if (child.type === 'package_declaration') {
-        packageName = child.text.replace(/^package\s+/, '').replace(';', '').trim();
-      }
-      if (child.type === 'import_declaration') {
-        const importPath = child.text.replace(/^import\s+/, '').replace(';', '').trim();
-        if (importPath) imports.push(importPath);
-      }
-    }
-
+    
+    // ========================================================================
+    // PHASE 3: Extract file-level metadata
+    // ========================================================================
+    
+    const packageName = extractPackageName(root);
+    const imports = extractImports(root);
+    
+    // ========================================================================
+    // PHASE 4: Find and process type declarations
+    // ========================================================================
+    
+    // Filter for type declarations: classes, enums, and records
     const declarations = root.children.filter(
-      (n: SyntaxNode) => n.type === 'class_declaration' || n.type === 'enum_declaration'
+      (n: SyntaxNode) => 
+        n.type === 'class_declaration' || 
+        n.type === 'enum_declaration' ||
+        n.type === 'record_declaration'  // Java 14+ records
     );
-
+    
     for (const decl of declarations) {
+      // ----------------------------------------------------------------------
+      // Class Declaration
+      // ----------------------------------------------------------------------
       if (decl.type === 'class_declaration') {
-        dtos.push(extractClass(decl, packageName, imports, filePath, knownClasses));
-      } else if (decl.type === 'enum_declaration') {
-        dtos.push(extractEnum(decl, packageName, imports, filePath));
+        const extracted = extractClass(decl, packageName, imports, filePath, knownClasses);
+        if (extracted) {
+          dtos.push(extracted);
+        }
+      }
+      
+      // ----------------------------------------------------------------------
+      // Enum Declaration
+      // ----------------------------------------------------------------------
+      else if (decl.type === 'enum_declaration') {
+        const extracted = extractEnum(decl, packageName, imports, filePath);
+        if (extracted) {
+          dtos.push(extracted);
+        }
+      }
+      
+      // ----------------------------------------------------------------------
+      // Record Declaration (Java 14+)
+      // ----------------------------------------------------------------------
+      else if (decl.type === 'record_declaration') {
+        const extracted = extractRecord(decl, packageName, imports, filePath, knownClasses);
+        if (extracted) {
+          dtos.push(extracted);
+        }
       }
     }
-
+    
+    // ========================================================================
+    // PHASE 5: Debug output (verbose mode only)
+    // ========================================================================
+    
     if (isVerbose && dtos.length > 0) {
       const fileName = filePath.split(/[/\\]/).pop();
-      console.log(`   🔍 Parsed ${fileName}`);
+      const dtoNames = dtos.map(d => d.className).join(', ');
+      logger.debug(`   🔍 Parsed ${fileName} → [${dtoNames}]`);
     }
+    
     return dtos;
+    
   } catch (error: any) {
-    console.error(`❌ Tree-sitter failed for ${filePath}: ${error.message}`);
+    // ========================================================================
+    // ERROR HANDLING
+    // ========================================================================
+    
+    // Log error but don't crash - continue with other files
+    logger.error(`❌ Tree-sitter failed for ${filePath}: ${error.message}`);
+    
+    // In verbose mode, show more details for debugging
+    if (isVerbose) {
+      logger.debug(`   Stack trace: ${error.stack}`);
+    }
+    
+    // Return empty array - caller should handle gracefully
     return [];
   }
 }
 
-/** Extract @JsonProperty value from field text */
-function extractJsonProperty(fieldText: string): string | undefined {
-  const match = fieldText.match(/@JsonProperty\s*\(\s*(?:value\s*=\s*)?["']([^"']*)["']/);
-  return match ? match[1] : undefined;
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+
+/**
+ * Check if a file contains any DTO-relevant declarations.
+ * Useful for pre-filtering files before full parsing.
+ */
+export function hasDTODeclarations(content: string): boolean {
+  // Quick regex check before invoking the full parser
+  return /(?:public\s+)?(?:class|enum|record)\s+\w+/.test(content);
 }
 
-/** Extract @JsonAlias values from field text */
-function extractJsonAliases(fieldText: string): string[] | undefined {
-  const match = fieldText.match(/@JsonAlias\s*\(\s*\{?\s*["']([^"']+)["'](?:\s*,\s*["']([^"']+)["'])*\s*\}?\s*\)/);
-  if (!match) return undefined;
-  
-  const aliases: string[] = [];
-  const aliasRegex = /["']([^"']+)["']/g;
-  let m: RegExpExecArray | null;
-  while ((m = aliasRegex.exec(match[0])) !== null) {
-    aliases.push(m[1]);
-  }
-  return aliases.length > 0 ? aliases : undefined;
-}
-
-/** Check if field has @JsonIgnore annotation */
-function hasJsonIgnore(fieldText: string, annotations: string[]): boolean {
-  return annotations.includes('JsonIgnore') || fieldText.includes('@JsonIgnore');
-}
-
-/** Check for annotations that affect type but can't be inferred */
-function getJacksonWarnings(fieldText: string, annotations: string[]): string[] {
-  const warnings: string[] = [];
-  if (annotations.includes('JsonSerialize') || fieldText.includes('@JsonSerialize')) {
-    warnings.push(`@JsonSerialize detected - type may differ from Java type`);
-  }
-  if (annotations.includes('JsonFormat') || fieldText.includes('@JsonFormat')) {
-    warnings.push(`@JsonFormat detected - serialization format may differ`);
-  }
-  if (annotations.includes('JsonUnwrapped') || fieldText.includes('@JsonUnwrapped')) {
-    warnings.push(`@JsonUnwrapped detected - fields are flattened in response`);
-  }
-  return warnings;
-}
-
-/** Extract a regular class */
-function extractClass(
-  node: SyntaxNode,
-  packageName: string,
-  imports: string[],
-  filePath: string,
-  knownClasses: Set<string>
-): DTOClass {
-  const className = node.childForFieldName('name')?.text || 'Unknown';
-
-  let extendsClass: string | undefined;
-  const superclass = node.childForFieldName('superclass');
-  if (superclass) {
-    const typeNode = superclass.children.find((c: SyntaxNode) => c.isNamed);
-    extendsClass = typeNode ? extractTypeText(typeNode) : undefined;
-  }
-
-  const implementsList: string[] = [];
-  const superinterfaces = node.childForFieldName('super_interfaces');
-  if (superinterfaces) {
-    for (const child of superinterfaces.children) {
-      if (child.isNamed && child.type !== 'implements') {
-        const typeName = extractTypeText(child);
-        if (typeName) implementsList.push(typeName);
-      }
-    }
-  }
-
-  const fields: DTOField[] = [];
-  const classBody = node.childForFieldName('body');
-  if (classBody) {
-    for (const member of classBody.children) {
-      if (member.type === 'field_declaration') {
-        fields.push(...extractFields(member, knownClasses));
-      }
-    }
-  }
-
-  return {
-    className,
-    packageName,
-    fields,
-    imports,
-    extends: extendsClass,
-    implements: implementsList,
-    isEnum: false,
-    enumValues: undefined,
-    filePath,
-  };
-}
-
-/** Extract fields from a field_declaration node */
-function extractFields(
-  fieldNode: SyntaxNode,
-  knownClasses: Set<string>
-): DTOField[] {
-  const fields: DTOField[] = [];
-  const fieldText = fieldNode.text;
-
-  const annotations: string[] = [];
-  let hasNotNull = false;
-
-  /** Helper to process any annotation node */
-  const processAnnotation = (node: SyntaxNode): void => {
-    const raw = node.childForFieldName('name')?.text || node.text || '';
-    let annName = raw.replace(/^@/, '').split('(')[0].trim();
-    
-    if (annName.includes('.')) {
-      annName = annName.split('.').pop() || annName;
-    }
-    
-    if (!annotations.includes(annName)) {
-      annotations.push(annName);
-    }
-    
-    // Support @NotNull, @Nonnull, @NonNull (including lombok.NonNull)
-    const normalized = annName.toLowerCase();
-    if (normalized === 'notnull' || normalized === 'nonnull') {
-      hasNotNull = true;
-    }
-  };
-
-  // ✅ Traverse ALL direct children for annotations
-  for (const child of fieldNode.children) {
-    if (child.type === 'annotation' || child.type === 'marker_annotation') {
-      processAnnotation(child);
-    }
-  }
-
-  // ✅ Also check inside modifiers node
-  const modifiersNode = fieldNode.childForFieldName('modifiers');
-  if (modifiersNode) {
-    for (const mod of modifiersNode.children) {
-      if (mod.type === 'annotation' || mod.type === 'marker_annotation') {
-        processAnnotation(mod);
-      }
-    }
-  }
-
-  // ✅ SUPER ROBUST FALLBACK: Raw text scan
-  if (!hasNotNull) {
-    const lowerText = fieldText.toLowerCase();
-    if (lowerText.includes('@notnull') || lowerText.includes('@nonnull')) {
-      hasNotNull = true;
-    }
-  }
-
-  // Extract Jackson annotations
-  const jsonName = extractJsonProperty(fieldText);
-  const jsonAliases = extractJsonAliases(fieldText);
-  const jsonIgnore = hasJsonIgnore(fieldText, annotations);
-  const jacksonWarnings = getJacksonWarnings(fieldText, annotations);
-
-  // EARLY RETURN: If @JsonIgnore, skip this field entirely
-  if (jsonIgnore) {
-    return fields;
-  }
-
-  const typeNode = fieldNode.childForFieldName('type');
-  const javaType = typeNode ? extractTypeText(typeNode) : 'unknown';
-
-  const declarators = fieldNode.children.filter((n: SyntaxNode) => n.type === 'variable_declarator');
-  for (const decl of declarators) {
-    const nameNode = decl.childForFieldName('name');
-    const fieldName = nameNode?.text;
-    if (!fieldName || fieldName === 'serialVersionUID') continue;
-
-    const tsType = mapJavaTypeToTS(javaType, knownClasses);
-    const nullable = !hasNotNull;
-
-    fields.push({
-      name: fieldName,
-      javaType,
-      tsType,
-      nullable,
-      isEnum: false,
-      annotations,
-      jsonName,
-      jsonAliases,
-      jsonIgnore,
-      jacksonWarnings,
-    });
-  }
-
-  return fields;
-}
-
-/** Extract enum */
-function extractEnum(
-  node: SyntaxNode,
-  packageName: string,
-  imports: string[],
-  filePath: string
-): DTOClass {
-  const className = node.childForFieldName('name')?.text || 'Unknown';
-  const enumValues: string[] = [];
-
-  const body = node.childForFieldName('body');
-  if (body) {
-    for (const child of body.children) {
-      if (child.type === 'enum_constant') {
-        const value = child.childForFieldName('name')?.text;
-        if (value) enumValues.push(value);
-      }
-    }
-  }
-
-  return {
-    className,
-    packageName,
-    fields: [],
-    imports,
-    extends: undefined,
-    implements: [],
-    isEnum: true,
-    enumValues,
-    filePath,
-  };
-}
-
-/** Recursively stringify a type node */
-function extractTypeText(node: SyntaxNode): string {
-  if (!node) return 'unknown';
-
-  if (node.type === 'array_type') {
-    const elem = node.childForFieldName('element');
-    const dims = (node.text.match(/\[\]/g) || []).length;
-    return `${extractTypeText(elem!)}${'[]'.repeat(dims)}`;
-  }
-
-  if (node.type === 'generic_type') {
-    const base = node.childForFieldName('type')?.text || '';
-    const typeArgs = node.children.find((c: SyntaxNode) => c.type === 'type_arguments');
-    if (typeArgs) {
-      const args = typeArgs.children
-        .filter((c: SyntaxNode) => c.isNamed)
-        .map(extractTypeText)
-        .join(', ');
-      return `${base}<${args}>`;
-    }
-    return base;
-  }
-
-  if (node.type === 'type_identifier' || node.type === 'scoped_type_identifier') {
-    return node.text;
-  }
-
-  return node.text || 'unknown';
+/**
+ * Get the singleton parser instance.
+ * Useful for testing or if other modules need direct parser access.
+ */
+export function getParser(): Parser {
+  return tsParser;
 }

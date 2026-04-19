@@ -26,6 +26,7 @@ const JAVA_TO_TS_TYPE: Record<string, string> = {
   'Date': 'string',
   'Instant': 'string',
   'ZonedDateTime': 'string',
+  'OffsetDateTime': 'string',
   'UUID': 'string',
   'Object': 'unknown',
   'void': 'void',
@@ -36,57 +37,56 @@ const PRIMITIVE_TYPES = new Set([
   'int', 'long', 'double', 'float', 'boolean', 'byte', 'short', 'char'
 ]);
 
-// Java wrapper types (can be null)
-const WRAPPER_TYPES: Record<string, string> = {
-  'Integer': 'int',
-  'Long': 'long',
-  'Double': 'double',
-  'Float': 'float',
-  'Boolean': 'boolean',
-  'Byte': 'byte',
-  'Short': 'short',
-  'Character': 'char',
-};
-
-const COLLECTION_TYPES = ['List', 'Set', 'Collection', 'Iterable', 'ArrayList', 'HashSet'];
-const MAP_TYPES = ['Map', 'HashMap', 'TreeMap', 'LinkedHashMap'];
+const COLLECTION_TYPES = new Set(['List', 'Set', 'Collection', 'Iterable', 'ArrayList', 'HashSet', 'LinkedHashSet', 'TreeSet']);
+const MAP_TYPES = new Set(['Map', 'HashMap', 'TreeMap', 'LinkedHashMap', 'ConcurrentHashMap']);
 
 export function mapJavaTypeToTS(javaType: string, knownClasses: Set<string> = new Set()): string {
-  // Handle null/undefined
   if (!javaType) return 'unknown';
   
-  // Remove whitespace
   const trimmed = javaType.trim();
+
+  if (COLLECTION_TYPES.has(trimmed)) return 'unknown[]';
+  if (MAP_TYPES.has(trimmed)) return 'Record<string, unknown>';
   
   // Handle Optional<T>
-  const optionalMatch = trimmed.match(/^Optional<(.+)>$/);
+  const optionalMatch = trimmed.match(/^Optional(?:Int|Long|Double)?<(.+)>$/);
   if (optionalMatch) {
     const innerType = mapJavaTypeToTS(optionalMatch[1], knownClasses);
     return `${innerType} | null`;
   }
   
+  // Handle wildcard generics
+  if (trimmed.includes('? extends')) {
+    const match = trimmed.match(/\? extends (\w+)/);
+    if (match) {
+      return mapJavaTypeToTS(match[1], knownClasses);
+    }
+    return 'unknown';
+  }
+  
+  if (trimmed.includes('? super')) {
+    return 'unknown';
+  }
+  
   // Handle generics like List<String> or Map<String, Integer>
-  const genericMatch = trimmed.match(/^(\w+)<(.+)>$/);
+  const genericMatch = trimmed.match(/^([\w.]+)<(.+)>$/);
   if (genericMatch) {
     const [, container, inner] = genericMatch;
+    const containerName = container.includes('.') ? container.split('.').pop()! : container;
     
-    if (COLLECTION_TYPES.includes(container)) {
-      const innerType = mapJavaTypeToTS(inner, knownClasses);
+    if (COLLECTION_TYPES.has(containerName)) {
+      const innerType = parseGenericArguments(inner, knownClasses)[0] || 'unknown';
       return `${innerType}[]`;
     }
     
-    if (MAP_TYPES.includes(container)) {
-      const parts = inner.split(',').map(p => p.trim());
-      if (parts.length === 2) {
-        const keyType = mapJavaTypeToTS(parts[0], knownClasses);
-        const valueType = mapJavaTypeToTS(parts[1], knownClasses);
-        return `Record<${keyType}, ${valueType}>`;
-      }
+    if (MAP_TYPES.has(containerName)) {
+      const [keyType, valueType] = parseGenericArguments(inner, knownClasses);
+      return `Record<${keyType || 'string'}, ${valueType || 'unknown'}>`;
     }
     
-    // Custom generic class
-    const innerType = mapJavaTypeToTS(inner, knownClasses);
-    return `${container}<${innerType}>`;
+    // ResponseEntity, Page, etc.
+    const innerTypes = parseGenericArguments(inner, knownClasses);
+    return `${containerName}<${innerTypes.join(', ')}>`;
   }
   
   // Handle arrays like String[]
@@ -95,18 +95,49 @@ export function mapJavaTypeToTS(javaType: string, knownClasses: Set<string> = ne
     return `${mapJavaTypeToTS(baseType, knownClasses)}[]`;
   }
   
+  // Handle fully qualified names
+  const simpleName = trimmed.includes('.') ? trimmed.split('.').pop()! : trimmed;
+  
   // Check known mappings
-  if (JAVA_TO_TS_TYPE[trimmed]) {
-    return JAVA_TO_TS_TYPE[trimmed];
+  if (JAVA_TO_TS_TYPE[simpleName]) {
+    return JAVA_TO_TS_TYPE[simpleName];
   }
   
   // Check if it's a known DTO class
-  if (knownClasses.has(trimmed)) {
-    return trimmed;
+  if (knownClasses.has(simpleName)) {
+    return simpleName;
   }
   
-  // Default to the original name (custom class)
-  return trimmed;
+  // Default to the original name
+  return simpleName;
+}
+
+function parseGenericArguments(inner: string, knownClasses: Set<string>): string[] {
+  const args: string[] = [];
+  let depth = 0;
+  let current = '';
+  
+  for (let i = 0; i < inner.length; i++) {
+    const char = inner[i];
+    
+    if (char === '<') depth++;
+    else if (char === '>') depth--;
+    else if (char === ',' && depth === 0) {
+      if (current.trim()) {
+        args.push(mapJavaTypeToTS(current.trim(), knownClasses));
+      }
+      current = '';
+      continue;
+    }
+    
+    current += char;
+  }
+  
+  if (current.trim()) {
+    args.push(mapJavaTypeToTS(current.trim(), knownClasses));
+  }
+  
+  return args;
 }
 
 export function isPrimitiveType(javaType: string): boolean {
@@ -114,36 +145,26 @@ export function isPrimitiveType(javaType: string): boolean {
   return PRIMITIVE_TYPES.has(baseType);
 }
 
-export function isWrapperType(javaType: string): boolean {
-  const baseType = extractBaseType(javaType);
-  return baseType in WRAPPER_TYPES;
-}
-
 export function extractBaseType(javaType: string): string {
-  // Remove generics
   let base = javaType.replace(/<[^>]+>/g, '');
-  // Remove array brackets
   base = base.replace(/\[\]/g, '');
+  base = base.includes('.') ? base.split('.').pop()! : base;
   return base.trim();
 }
 
 export function isNullable(annotations: string[], javaType?: string): boolean {
-  // Primitive types CANNOT be null in Java (this overrides everything)
   if (javaType && isPrimitiveType(javaType)) {
     return false;
   }
   
-  // If @NotNull, @NotEmpty, or @NotBlank is present, it's REQUIRED (not nullable)
   if (isRequired(annotations)) {
     return false;
   }
   
-  // Optional<T> is always nullable
   if (javaType && javaType.startsWith('Optional<')) {
     return true;
   }
   
-  // Check for explicit nullable annotations
   const nullableAnnotations = ['Nullable', 'CheckForNull', 'Null'];
   const hasNullableAnnotation = annotations.some(ann => 
     nullableAnnotations.some(n => ann.includes(n))
@@ -153,12 +174,11 @@ export function isNullable(annotations: string[], javaType?: string): boolean {
     return true;
   }
   
-  // Default: nullable (wrapper types, String, custom classes are all nullable by default)
   return true;
 }
 
 export function isRequired(annotations: string[]): boolean {
-  const requiredAnnotations = ['NotNull', 'NotEmpty', 'NotBlank'];
+  const requiredAnnotations = ['NotNull', 'NonNull', 'NotEmpty', 'NotBlank'];
   return annotations.some(ann => 
     requiredAnnotations.some(r => ann.includes(r))
   );
