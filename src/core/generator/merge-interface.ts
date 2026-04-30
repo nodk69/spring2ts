@@ -1,4 +1,4 @@
-import * as fs from 'fs';
+import { fileExists, readTextFile } from '../../utils/filesystem';
 
 /**
  * Parse TypeScript interface and extract field names and types
@@ -25,11 +25,15 @@ function parseExistingInterface(content: string): Map<string, string> {
  */
 export function mergeInterface(existingPath: string, generated: string): string {
   // If file doesn't exist, just return generated
-  if (!fs.existsSync(existingPath)) {
+  if (!fileExists(existingPath)) {
     return generated;
   }
   
-  const existing = fs.readFileSync(existingPath, 'utf-8');
+  const existing = readTextFile(existingPath);
+  return mergeInterfaceContent(existing, generated);
+}
+
+export function mergeInterfaceContent(existing: string, generated: string): string {
   
   // Parse existing fields
   const existingFields = parseExistingInterface(existing);

@@ -36,6 +36,9 @@ const JAVA_TO_TS_TYPE: Record<string, string> = {
 const PRIMITIVE_TYPES = new Set([
   'int', 'long', 'double', 'float', 'boolean', 'byte', 'short', 'char'
 ]);
+const WRAPPER_TYPES = new Set([
+  'Integer', 'Long', 'Double', 'Float', 'Boolean', 'Byte', 'Short', 'Character'
+]);
 
 const COLLECTION_TYPES = new Set(['List', 'Set', 'Collection', 'Iterable', 'ArrayList', 'HashSet', 'LinkedHashSet', 'TreeSet']);
 const MAP_TYPES = new Set(['Map', 'HashMap', 'TreeMap', 'LinkedHashMap', 'ConcurrentHashMap']);
@@ -56,15 +59,19 @@ export function mapJavaTypeToTS(javaType: string, knownClasses: Set<string> = ne
   }
   
   // Handle wildcard generics
-  if (trimmed.includes('? extends')) {
-    const match = trimmed.match(/\? extends (\w+)/);
+  if (trimmed.startsWith('? extends ')) {
+    const match = trimmed.match(/^\? extends (.+)$/);
     if (match) {
-      return mapJavaTypeToTS(match[1], knownClasses);
+      return mapJavaTypeToTS(match[1].trim(), knownClasses);
     }
     return 'unknown';
   }
   
-  if (trimmed.includes('? super')) {
+  if (trimmed.startsWith('? super ')) {
+    return 'unknown';
+  }
+
+  if (trimmed === '?') {
     return 'unknown';
   }
   
@@ -143,6 +150,11 @@ function parseGenericArguments(inner: string, knownClasses: Set<string>): string
 export function isPrimitiveType(javaType: string): boolean {
   const baseType = extractBaseType(javaType);
   return PRIMITIVE_TYPES.has(baseType);
+}
+
+export function isWrapperType(javaType: string): boolean {
+  const baseType = extractBaseType(javaType);
+  return WRAPPER_TYPES.has(baseType);
 }
 
 export function extractBaseType(javaType: string): string {

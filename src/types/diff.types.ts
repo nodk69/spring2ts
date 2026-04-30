@@ -20,6 +20,15 @@ export interface Change {
   message: string;
   filePath?: string;
   lineNumber?: number;
+  frontendUsage?: {
+    isUsed: boolean;
+    locations: Array<{
+      filePath: string;
+      line: number;
+      kind: 'class' | 'field';
+      match: string;
+    }>;
+  };
 }
 
 export interface DiffResult {

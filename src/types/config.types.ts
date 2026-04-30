@@ -5,6 +5,7 @@ export interface Spring2TSConfig {
   typeMappings?: Record<string, string>;
   excludePatterns?: string[];
   includeNested?: boolean;
+  incremental?: boolean;
 }
 
 export interface ConfigValidationResult {

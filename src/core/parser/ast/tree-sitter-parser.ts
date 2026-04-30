@@ -1,21 +1,15 @@
-import Parser, { SyntaxNode } from 'tree-sitter';
-import Java from 'tree-sitter-java';
+import Parser, { Query, SyntaxNode } from 'tree-sitter';
 import { DTOClass } from '../../../types/dto.types';
 import { extractClass } from './extractors/class-extractor';
 import { extractEnum } from './extractors/enum-extractor';
 import { extractRecord } from './extractors/record-extractor';
+import { Queries, queryAll } from './queries';
 import { logger } from '../../../utils/logger';
+import { getDefaultParser, getParserPool } from '../parser-pool';
 
 // ============================================================================
 // PARSER SETUP
 // ============================================================================
-
-/**
- * Singleton Tree-sitter parser instance.
- * Reusing a single parser is significantly faster than creating a new one per file.
- */
-const tsParser = new Parser();
-tsParser.setLanguage(Java);
 
 /**
  * Verbose logging flag - enables detailed debug output.
@@ -130,11 +124,11 @@ function extractImports(root: SyntaxNode): string[] {
  * @param knownClasses - Set of already discovered class names (for type resolution)
  * @returns Array of extracted DTO classes (may be empty if none found)
  */
-export function parseJavaFileWithAST(
+export async function parseJavaFileWithAST(
   content: string,
   filePath: string,
   knownClasses: Set<string>
-): DTOClass[] {
+): Promise<DTOClass[]> {
   const dtos: DTOClass[] = [];
 
   try {
@@ -152,7 +146,7 @@ export function parseJavaFileWithAST(
     // PHASE 2: Parse into AST
     // ========================================================================
     
-    const tree = tsParser.parse(content);
+    const tree = await getParserPool().withParser((parser) => parser.parse(content));
     const root = tree.rootNode;
     
     // ========================================================================
@@ -166,13 +160,11 @@ export function parseJavaFileWithAST(
     // PHASE 4: Find and process type declarations
     // ========================================================================
     
-    // Filter for type declarations: classes, enums, and records
-    const declarations = root.children.filter(
-      (n: SyntaxNode) => 
-        n.type === 'class_declaration' || 
-        n.type === 'enum_declaration' ||
-        n.type === 'record_declaration'  // Java 14+ records
-    );
+    const declarations = [
+      ...collectQueriedNodes(root, Queries.CLASS_DECLARATIONS, 'class'),
+      ...collectQueriedNodes(root, Queries.ENUM_CONSTANTS, 'enum'),
+      ...root.children.filter((node: SyntaxNode) => node.type === 'record_declaration'),
+    ].sort((left, right) => left.startIndex - right.startIndex);
     
     for (const decl of declarations) {
       // ----------------------------------------------------------------------
@@ -254,5 +246,26 @@ export function hasDTODeclarations(content: string): boolean {
  * Useful for testing or if other modules need direct parser access.
  */
 export function getParser(): Parser {
-  return tsParser;
+  return getDefaultParser();
+}
+
+function collectQueriedNodes(
+  root: SyntaxNode,
+  query: Query,
+  captureName: string
+): SyntaxNode[] {
+  const matches = queryAll(root, query)
+    .map((match) => match.get(captureName))
+    .filter((node): node is SyntaxNode => node !== undefined)
+    .filter((node) => node.parent === root);
+  const uniqueNodes = new Map<string, SyntaxNode>();
+
+  for (const node of matches) {
+    if (!node) {
+      continue;
+    }
+    uniqueNodes.set(`${node.type}:${node.startIndex}:${node.endIndex}`, node);
+  }
+
+  return Array.from(uniqueNodes.values());
 }

@@ -6,8 +6,13 @@ import {
   SAFE_RULES,
   RuleContext 
 } from './rules';
+import { FrontendUsageReport } from '../../types/frontend-usage.types';
 
-export function compareDTOs(oldParsed: ParsedDTO, newParsed: ParsedDTO): DiffResult {
+export function compareDTOs(
+  oldParsed: ParsedDTO,
+  newParsed: ParsedDTO,
+  frontendUsage?: FrontendUsageReport
+): DiffResult {
   const changes: Change[] = [];
   
   const oldClassMap = new Map(oldParsed.classes.map(c => [c.className, c]));
@@ -64,11 +69,41 @@ export function compareDTOs(oldParsed: ParsedDTO, newParsed: ParsedDTO): DiffRes
   const warning = changes.filter(c => c.severity === 'WARNING').length;
   const safe = changes.filter(c => c.severity === 'SAFE').length;
   
+  const annotatedChanges = annotateChangesWithFrontendUsage(changes, frontendUsage);
+
   return {
     hasBreakingChanges: breaking > 0,
-    changes,
+    changes: annotatedChanges,
     summary: { breaking, warning, safe },
   };
+}
+
+function annotateChangesWithFrontendUsage(
+  changes: Change[],
+  frontendUsage?: FrontendUsageReport
+): Change[] {
+  if (!frontendUsage) {
+    return changes;
+  }
+
+  return changes.map((change) => {
+    const classUsage = frontendUsage.classes[change.className];
+    if (!classUsage) {
+      return change;
+    }
+
+    const locations = change.fieldName
+      ? classUsage.fields[change.fieldName]?.locations || []
+      : classUsage.classLocations;
+
+    return {
+      ...change,
+      frontendUsage: {
+        isUsed: locations.length > 0,
+        locations,
+      },
+    };
+  });
 }
 
 function compareClassFieldsWithRules(oldClass: DTOClass, newClass: DTOClass): Change[] {

@@ -1,45 +1,24 @@
 import { parseDTOs } from '../core/parser/index';
 import { generateTypeScript } from '../core/generator/index';
 import { checkBreakingChanges } from '../core/diff/index';
+import { analyzeFrontendUsage, resolveFrontendUsageRoot } from '../core/frontend/usage-analyzer';
+import { loadSnapshot } from '../core/storage/snapshot';
 import { logger } from '../utils/logger';
-import { writeFile, ensureDirectory } from '../utils/file-utils';
-import * as path from 'path';
-import * as fs from 'fs';
+import { copyDirectory, ensureDirectory, isDirectory, pathExists, writeTextFile } from '../utils/filesystem';
+import { joinPaths, resolveFromCwd } from '../utils/paths';
 import { EXIT_CODES } from '../constants/exit-codes';
 import chalk from 'chalk';
-
-export interface SyncOptions {
-  backend?: string;
-  frontend?: string;
-  config?: string;
-  check?: boolean;
-  failOnBreaking?: boolean;
-  dryRun?: boolean;
-  backup?: boolean;
-  safe?: boolean;
-  isSyncMode?: boolean;
-  merge?: boolean; 
-}
-
-function loadConfig(): Partial<SyncOptions> {
-  try {
-    const configPath = path.join(process.cwd(), '.spring2tsrc.json');
-    if (fs.existsSync(configPath)) {
-      return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    }
-  } catch {}
-  return {};
-}
+import { SyncOptions, loadConfig, DEFAULT_CONFIG } from './options';
 
 export async function sync(options: SyncOptions): Promise<void> {
   const startTime = Date.now();
   const config = loadConfig();
   
-  let backendPath = options.backend || config.backend || './backend/src/main/java';
-  let frontendPath = options.frontend || config.frontend || './src/types';
+  let backendPath = options.backend || config.backend || DEFAULT_CONFIG.backend;
+  let frontendPath = options.frontend || config.frontend || DEFAULT_CONFIG.frontend;
   
-  backendPath = path.resolve(process.cwd(), backendPath);
-  if (frontendPath) frontendPath = path.resolve(process.cwd(), frontendPath);
+  backendPath = resolveFromCwd(backendPath);
+  if (frontendPath) frontendPath = resolveFromCwd(frontendPath);
   
   const checkOnly = options.check || false;
   const failOnBreaking = options.failOnBreaking || config.failOnBreaking || false;
@@ -47,9 +26,9 @@ export async function sync(options: SyncOptions): Promise<void> {
   const backup = options.backup || false;
   const safe = options.safe || false;
   const isSyncMode = options.isSyncMode || false;
-  const merge = options.merge !== false;  
+  const merge = options.merge !== false;
+  const incremental = options.incremental || false;
   
-  // === CLEAN OUTPUT ===
   logger.title(`Spring2TS v0.3.0`);
   logger.kv('Backend: ', backendPath);
   if (!checkOnly) logger.kv('Frontend:', frontendPath);
@@ -57,10 +36,10 @@ export async function sync(options: SyncOptions): Promise<void> {
   if (safe) logger.kv('Mode:   ', chalk.yellow('SAFE MODE'));
   if (isSyncMode) logger.kv('Mode:   ', chalk.cyan('SYNC (accepting changes)'));
   if (!merge) logger.kv('Mode:   ', chalk.yellow('OVERWRITE (no merge)'));
+  if (incremental) logger.kv('Mode:   ', chalk.cyan('INCREMENTAL'));
   logger.blank();
   
   try {
-    // Parse
     const parsed = await parseDTOs({ inputPath: backendPath, excludePatterns: [], includeNested: true });
     
     if (parsed.classes.length === 0 && parsed.enums.length === 0) {
@@ -69,34 +48,76 @@ export async function sync(options: SyncOptions): Promise<void> {
       logger.success(`Found ${parsed.classes.length} DTOs, ${parsed.enums.length} enums`);
     }
     
-    // Check breaking changes
-    const outputDir = path.join(process.cwd(), '.spring2ts');
+    const outputDir = joinPaths(process.cwd(), '.spring2ts');
     ensureDirectory(outputDir);
-    writeFile(path.join(outputDir, 'parsed-dtos.json'), JSON.stringify(parsed, null, 2));
-    
-    const baselinePath = path.join(outputDir, 'baseline.json');
+    writeTextFile(joinPaths(outputDir, 'parsed-dtos.json'), JSON.stringify(parsed, null, 2));
+
+    const baselinePath = joinPaths(outputDir, 'baseline.json');
+    const baselineSnapshot = loadSnapshot(baselinePath);
+
+    let frontendUsage;
+    if (frontendPath) {
+      const frontendUsageRoot = resolveFrontendUsageRoot(frontendPath);
+      if (isDirectory(frontendUsageRoot)) {
+        const currentClasses = parsed.classes.map((dto) => dto.className);
+        const baselineClasses = (baselineSnapshot?.classes || []).map((dto: { className: string }) => dto.className);
+        const classNames = [...new Set([...currentClasses, ...baselineClasses])];
+        const baselineFieldMap: Record<string, string[]> = Object.fromEntries(
+          ((baselineSnapshot?.classes || []) as Array<{ className: string; fields: Array<{ name?: string; jsonName?: string }> }>).map((dto) => [
+            dto.className,
+            dto.fields
+              .map((field) => field.jsonName || field.name)
+              .filter((fieldName): fieldName is string => Boolean(fieldName)),
+          ])
+        );
+        const currentFieldMap: Record<string, string[]> = Object.fromEntries(
+          parsed.classes.map((dto) => [
+            dto.className,
+            dto.fields
+              .map((field) => field.jsonName || field.name)
+              .filter((fieldName): fieldName is string => Boolean(fieldName)),
+          ])
+        );
+        const fieldNamesByClass: Record<string, string[]> = Object.fromEntries(
+          classNames.map((className) => [
+            className,
+            [...new Set([...(baselineFieldMap[className] || []), ...(currentFieldMap[className] || [])])],
+          ])
+        );
+
+        logger.info(`Analyzing frontend usage in ${frontendUsageRoot}`);
+        frontendUsage = await analyzeFrontendUsage(
+          frontendUsageRoot,
+          classNames,
+          fieldNamesByClass,
+          [frontendPath]
+        );
+        writeTextFile(joinPaths(outputDir, 'frontend-usage.json'), JSON.stringify(frontendUsage, null, 2));
+      } else if (checkOnly) {
+        logger.warn(`Frontend path not found for usage analysis: ${frontendUsageRoot}`);
+      }
+    }
+
     const diff = await checkBreakingChanges({
       parsed,
       baselinePath,
       failOnBreaking: isSyncMode ? false : failOnBreaking,
       updateBaseline: !checkOnly || isSyncMode,
-      isSyncMode
+      isSyncMode,
+      frontendUsage
     });
     
-    // Safe mode abort
     if (safe && diff.hasBreakingChanges) {
       logger.error('Breaking changes detected. Aborted (--safe mode).');
       process.exit(EXIT_CODES.BREAKING_CHANGE);
     }
     
-    // Backup
-    if (backup && !checkOnly && frontendPath && !dryRun && fs.existsSync(frontendPath)) {
+    if (backup && !checkOnly && frontendPath && !dryRun && pathExists(frontendPath)) {
       const backupPath = `${frontendPath}.backup.${Date.now()}`;
-      fs.cpSync(frontendPath, backupPath, { recursive: true });
+      copyDirectory(frontendPath, backupPath);
       logger.info(`Backup: ${backupPath}`);
     }
     
-    // Generate
     if (!checkOnly && frontendPath) {
       if (dryRun) {
         logger.info(`Would generate ${parsed.classes.length + parsed.enums.length + 1} files`);
@@ -104,7 +125,8 @@ export async function sync(options: SyncOptions): Promise<void> {
         await generateTypeScript({ 
           outputPath: frontendPath, 
           parsed,
-          merge  // ✅ Pass merge option
+          merge,
+          incremental
         });
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
         logger.success(`Generated ${parsed.classes.length + parsed.enums.length + 1} files in ${elapsed}s`);

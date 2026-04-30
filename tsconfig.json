@@ -11,6 +11,6 @@
     "resolveJsonModule": true,
     "typeRoots": ["./node_modules/@types", "./src/types"]
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "src/core/parser/ast/annotations/jackson.ts"],
   "exclude": ["node_modules", "dist"]
 }
