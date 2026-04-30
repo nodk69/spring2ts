@@ -1,7 +1,8 @@
 import * as fs from 'fs';
-import * as path from 'path';
 import * as crypto from 'crypto';
 import { logger } from '../../utils/logger';
+import { ensureDirectory, pathExists, readTextFile } from '../../utils/filesystem';
+import { joinPaths } from '../../utils/paths';
 
 interface CacheEntry {
   data: any;
@@ -15,15 +16,12 @@ export class ParseCache {
   private readonly MAX_MEMORY_ENTRIES = 500;
   
   constructor() {
-    this.cacheDir = path.join(process.cwd(), '.spring2ts/cache/parse');
+    this.cacheDir = joinPaths(process.cwd(), '.spring2ts/cache/parse');
     this.ensureDir();
-    this.loadMemoryCache();
   }
   
   private ensureDir(): void {
-    if (!fs.existsSync(this.cacheDir)) {
-      fs.mkdirSync(this.cacheDir, { recursive: true });
-    }
+    ensureDirectory(this.cacheDir);
   }
   
   private getKey(input: string): string {
@@ -31,7 +29,7 @@ export class ParseCache {
   }
   
   private getPath(key: string): string {
-    return path.join(this.cacheDir, `${key}.json`);
+    return joinPaths(this.cacheDir, `${key}.json`);
   }
   
   /**
@@ -55,10 +53,10 @@ export class ParseCache {
     
     // Check disk
     const cachePath = this.getPath(cacheKey);
-    if (!fs.existsSync(cachePath)) return null;
+    if (!pathExists(cachePath)) return null;
     
     try {
-      const entry: CacheEntry = JSON.parse(fs.readFileSync(cachePath, 'utf-8'));
+      const entry: CacheEntry = JSON.parse(readTextFile(cachePath));
       
       if (sourceContent) {
         const currentHash = this.hashContent(sourceContent);
@@ -118,7 +116,7 @@ export class ParseCache {
    */
   clear(): void {
     this.memoryCache.clear();
-    if (fs.existsSync(this.cacheDir)) {
+    if (pathExists(this.cacheDir)) {
       fs.rmSync(this.cacheDir, { recursive: true, force: true });
     }
     this.ensureDir();
@@ -129,7 +127,7 @@ export class ParseCache {
    */
   getStats(): { memoryEntries: number; diskEntries: number } {
     let diskEntries = 0;
-    if (fs.existsSync(this.cacheDir)) {
+    if (pathExists(this.cacheDir)) {
       diskEntries = fs.readdirSync(this.cacheDir).filter(f => f.endsWith('.json')).length;
     }
     return {
@@ -148,32 +146,6 @@ export class ParseCache {
       if (firstKey) {
         this.memoryCache.delete(firstKey);
       }
-    }
-  }
-  
-  private loadMemoryCache(): void {
-    if (!fs.existsSync(this.cacheDir)) return;
-    
-    const files = fs.readdirSync(this.cacheDir);
-    let loaded = 0;
-    
-    for (const file of files) {
-      if (!file.endsWith('.json')) continue;
-      if (this.memoryCache.size >= this.MAX_MEMORY_ENTRIES) break;
-      
-      try {
-        const entry: CacheEntry = JSON.parse(
-          fs.readFileSync(path.join(this.cacheDir, file), 'utf-8')
-        );
-        this.memoryCache.set(file.replace('.json', ''), entry);
-        loaded++;
-      } catch {
-        // Skip corrupted
-      }
-    }
-    
-    if (loaded > 0) {
-      logger.debug(`Loaded ${loaded} cache entries into memory`);
     }
   }
 }

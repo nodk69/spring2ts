@@ -13,6 +13,10 @@ export interface DTOField {
   enumName?: string;
   genericType?: string;
   annotations: string[];
+   position?: {
+    start: { line: number; column: number };
+    end: { line: number; column: number };
+  };
 }
 
 export interface DTOClass {
@@ -20,6 +24,7 @@ export interface DTOClass {
   packageName: string;
   fields: DTOField[];
   imports: string[];
+  typeParameters?: string[];
   extends?: string;
   implements?: string[];
   isEnum: boolean;

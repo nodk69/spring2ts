@@ -3,8 +3,11 @@ export const EXIT_CODES = {
   PARSE_ERROR: 1,
   FILE_NOT_FOUND: 2,
   BREAKING_CHANGE: 3,
-  CONFIG_ERROR: 4,
+  API_MISMATCH: 4,
   UNKNOWN_ERROR: 5,
+  API_UNREACHABLE: 6,
+  TYPE_ERROR: 7,
+  CONFIG_ERROR: 8,
 } as const;
 
 export type ExitCode = typeof EXIT_CODES[keyof typeof EXIT_CODES];

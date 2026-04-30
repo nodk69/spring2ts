@@ -5,3 +5,68 @@ coverage/
 .DS_Store
 .spring2ts/
 *.snapshot.json
+
+# Test output directories
+test-*/
+test-*-output/
+test-*-output-*/
+test-real-project/
+test-real-types/
+
+# Generated test files  
+test-capability/
+test-capability-output/
+test-capability-output-sync/
+test-capability-output-warm/
+
+# Test Spring Boot apps
+test-spring-app/
+test-spring-app-output/
+test-extreme-api/
+test-runtime/
+test-runtime-output/
+
+# Edge case tests
+test-edge-hell/
+test-edge-hell-output/
+test-brutal-api/
+test-brutal-api-output/
+test-final/
+test-final-output/
+test-final-output-perf/
+test-final-output-sync/
+test-final-output-test/
+
+# Performance tests
+test-perf-*/
+test-500/
+test-500-output/
+test-500-output-warm/
+test-500-output-inc/
+test-1000/
+test-1000-output/
+test-1000-output-warm/
+test-1000-output-inc/
+test-5000/
+test-5000-output/
+test-5000-output-warm/
+test-5000-output-inc/
+
+# CI tests
+test-ci-app/
+test-ci-output/
+
+# Verify tests
+test-verify/
+test-verify-output/
+
+# E2E tests
+test-e2e/
+test-e2e-output/
+test-e2e-output2/
+
+# Local config
+.spring2tsrc.json
+
+# Backup files
+*.backup.*

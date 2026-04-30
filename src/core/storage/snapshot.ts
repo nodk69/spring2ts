@@ -1,8 +1,8 @@
 import * as fs from 'fs';
-import * as path from 'path';
 import { ParsedDTO } from '../../types/dto.types';
 import { Snapshot } from '../../types/diff.types';
-import { ensureDirectory } from '../../utils/file-utils';
+import { ensureDirectory, pathExists, readTextFile, removeFile, writeTextFile } from '../../utils/filesystem';
+import { getDirectoryName } from '../../utils/paths';
 
 /**
  * Create a snapshot from parsed DTOs
@@ -11,8 +11,8 @@ export function createSnapshot(parsed: ParsedDTO, version: string = '1.0.0'): Sn
   return {
     timestamp: new Date().toISOString(),
     version,
-    classes: parsed.classes,
-    enums: parsed.enums,
+    classes: structuredClone(parsed.classes),
+    enums: structuredClone(parsed.enums),
   };
 }
 
@@ -20,8 +20,8 @@ export function createSnapshot(parsed: ParsedDTO, version: string = '1.0.0'): Sn
  * Save snapshot to file
  */
 export function saveSnapshot(snapshot: Snapshot, filePath: string): void {
-  ensureDirectory(path.dirname(filePath));
-  fs.writeFileSync(filePath, JSON.stringify(snapshot, null, 2), 'utf-8');
+  ensureDirectory(getDirectoryName(filePath));
+  writeTextFile(filePath, JSON.stringify(snapshot, null, 2));
 }
 
 /**
@@ -29,10 +29,10 @@ export function saveSnapshot(snapshot: Snapshot, filePath: string): void {
  */
 export function loadSnapshot(filePath: string): Snapshot | null {
   try {
-    if (!fs.existsSync(filePath)) {
+    if (!pathExists(filePath)) {
       return null;
     }
-    const content = fs.readFileSync(filePath, 'utf-8');
+    const content = readTextFile(filePath);
     return JSON.parse(content);
   } catch (error) {
     console.error('Failed to load snapshot:', error);
@@ -44,7 +44,7 @@ export function loadSnapshot(filePath: string): Snapshot | null {
  * Check if snapshot exists
  */
 export function snapshotExists(filePath: string): boolean {
-  return fs.existsSync(filePath);
+  return pathExists(filePath);
 }
 
 /**
@@ -52,7 +52,7 @@ export function snapshotExists(filePath: string): boolean {
  */
 export function getSnapshotAge(filePath: string): number | null {
   try {
-    if (!fs.existsSync(filePath)) {
+    if (!pathExists(filePath)) {
       return null;
     }
     const stats = fs.statSync(filePath);
@@ -66,8 +66,8 @@ export function getSnapshotAge(filePath: string): number | null {
  * Delete snapshot
  */
 export function deleteSnapshot(filePath: string): void {
-  if (fs.existsSync(filePath)) {
-    fs.unlinkSync(filePath);
+  if (pathExists(filePath)) {
+    removeFile(filePath);
   }
 }
 

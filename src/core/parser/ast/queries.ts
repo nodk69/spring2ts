@@ -26,7 +26,7 @@ export const Queries = {
   FIELDS: new Query(Java, `
     (field_declaration
       type: (_) @type
-      declarator: (variable_declarator
+      (variable_declarator
         name: (identifier) @name)) @field
   `),
   
@@ -42,9 +42,7 @@ export const Queries = {
   /** Extract class inheritance */
   INHERITANCE: new Query(Java, `
     (class_declaration
-      name: (identifier) @class_name
-      superclass: (superclass (type_identifier) @extends)?
-      super_interfaces: (super_interfaces (type_identifier) @implements)) @class
+      name: (identifier) @class_name) @class
   `),
   
   /** Extract all class declarations */
@@ -56,11 +54,7 @@ export const Queries = {
   
   /** Extract generic type parameters */
   GENERIC_TYPE: new Query(Java, `
-    (generic_type
-      (type_identifier) @container
-      (type_arguments
-        (type_argument
-          (_) @type_arg)) @args) @generic
+    (generic_type) @generic
   `)
 };
 

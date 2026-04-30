@@ -1,5 +1,6 @@
 import { SyntaxNode } from 'tree-sitter';
 import { DTOClass } from '../../../../types/dto.types';
+import { Queries, queryAll } from '../queries';
 
 /**
  * Extract information from an enum declaration node.
@@ -13,17 +14,9 @@ export function extractEnum(
   const className = node.childForFieldName('name')?.text;
   if (!className) return null;
   
-  const enumValues: string[] = [];
-
-  const body = node.childForFieldName('body');
-  if (body) {
-    for (const child of body.children) {
-      if (child.type === 'enum_constant') {
-        const value = child.childForFieldName('name')?.text;
-        if (value) enumValues.push(value);
-      }
-    }
-  }
+  const enumValues = queryAll(node, Queries.ENUM_CONSTANTS)
+    .map((match) => match.get('constant_name')?.text)
+    .filter((value): value is string => Boolean(value));
 
   return {
     className,

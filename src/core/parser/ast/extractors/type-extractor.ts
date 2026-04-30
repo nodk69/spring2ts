@@ -17,9 +17,15 @@ export function extractTypeText(node: SyntaxNode, knownClasses: Set<string>): st
 
   // Generic types (List<T>, Map<K,V>, Optional<T>)
   if (node.type === 'generic_type') {
-    const containerNode = node.childForFieldName('type');
-    const container = containerNode?.text || '';
-    const typeArgs = node.childForFieldName('type_arguments');
+    const containerNode =
+      node.childForFieldName('type') ||
+      node.namedChildren.find((c: SyntaxNode) =>
+        c.type === 'type_identifier' || c.type === 'scoped_type_identifier'
+      );
+    const container = containerNode?.text || node.text.split('<')[0].trim();
+    const typeArgs =
+      node.childForFieldName('type_arguments') ||
+      node.namedChildren.find((c: SyntaxNode) => c.type === 'type_arguments');
     
     if (typeArgs) {
       const args = typeArgs.namedChildren
@@ -42,11 +48,7 @@ export function extractTypeText(node: SyntaxNode, knownClasses: Set<string>): st
   
   // Wildcard types (? extends T)
   if (node.type === 'wildcard') {
-    const bound = node.childForFieldName('bound');
-    if (bound) {
-      return 'unknown';
-    }
-    return 'unknown';
+    return mapJavaTypeToTS(node.text || 'unknown', knownClasses);
   }
 
   return mapJavaTypeToTS(node.text || 'unknown', knownClasses);

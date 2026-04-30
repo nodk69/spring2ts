@@ -4,6 +4,7 @@ import { DiffResult } from '../../types/diff.types';
 import { loadSnapshot, createSnapshot, saveSnapshot } from '../storage/snapshot';
 import { compareDTOs } from './comparator';
 import { printCheckResult } from './reporter';
+import { FrontendUsageReport } from '../../types/frontend-usage.types';
 
 export interface CheckOptions {
   parsed: ParsedDTO;
@@ -11,10 +12,11 @@ export interface CheckOptions {
   failOnBreaking: boolean;
   updateBaseline: boolean;
   isSyncMode?: boolean;
+  frontendUsage?: FrontendUsageReport;
 }
 
 export async function checkBreakingChanges(options: CheckOptions): Promise<DiffResult> {
-  const { parsed, baselinePath, failOnBreaking, updateBaseline, isSyncMode } = options;
+  const { parsed, baselinePath, failOnBreaking, updateBaseline, isSyncMode, frontendUsage } = options;
   
   const oldSnapshot = loadSnapshot(baselinePath);
   
@@ -35,7 +37,7 @@ export async function checkBreakingChanges(options: CheckOptions): Promise<DiffR
     enums: oldSnapshot.enums,
   };
   
-  const diff = compareDTOs(oldParsed, parsed);
+  const diff = compareDTOs(oldParsed, parsed, frontendUsage);
   
   if (updateBaseline) {
     const newSnapshot = createSnapshot(parsed);

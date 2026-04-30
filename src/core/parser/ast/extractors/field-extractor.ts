@@ -4,13 +4,12 @@ import { extractTypeText } from './type-extractor';
 import { extractJacksonAnnotations } from '../annotations/jackson';
 import { extractValidationAnnotations } from '../annotations/validation';
 import { getPosition } from '../annotations/core';
+import { logger } from '../../../../utils/logger';
 
 
-export function extractFields(
-  fieldNode: SyntaxNode,
-  knownClasses: Set<string>
-): DTOField[] {
+export function extractFields(fieldNode: SyntaxNode, knownClasses: Set<string>): DTOField[] {
   const fields: DTOField[] = [];
+  const fieldText = fieldNode.text;  // Full text with annotations!
   
   // Get type information
   const typeNode = fieldNode.childForFieldName('type');
@@ -21,8 +20,51 @@ export function extractFields(
   const jackson = extractJacksonAnnotations(fieldNode);
   const validation = extractValidationAnnotations(fieldNode);
   
-  // Skip if @JsonIgnore
-  if (jackson.jsonIgnore) {
+  // FALLBACK: If AST extraction failed, use regex on raw text
+  if (!jackson.jsonName && fieldText.includes('@JsonProperty')) {
+    const match = fieldText.match(/@JsonProperty\s*\(\s*(?:value\s*=\s*)?["']([^"']+)["']/);
+    if (match) jackson.jsonName = match[1];
+  }
+  
+  if (!jackson.jsonAliases && fieldText.includes('@JsonAlias')) {
+    const aliasMatch = fieldText.match(/@JsonAlias\s*\(\s*\{?\s*["']([^"']+)["'](?:\s*,\s*["']([^"']+)["'])*\s*\}?\s*\)/);
+    if (aliasMatch) {
+      const aliases: string[] = [];
+      const aliasRegex = /["']([^"']+)["']/g;
+      let m;
+      while ((m = aliasRegex.exec(aliasMatch[0])) !== null) {
+        aliases.push(m[1]);
+      }
+      if (aliases.length > 0) jackson.jsonAliases = aliases;
+    }
+  }
+  
+  if (!validation.hasNotNull && (fieldText.includes('@NotNull') || fieldText.includes('@NonNull'))) {
+    validation.hasNotNull = true;
+  }
+  
+  if (!validation.hasNotEmpty && fieldText.includes('@NotEmpty')) {
+    validation.hasNotEmpty = true;
+    validation.hasNotNull = true;
+  }
+  
+  if (!validation.hasNotBlank && fieldText.includes('@NotBlank')) {
+    validation.hasNotBlank = true;
+    validation.hasNotNull = true;
+  }
+
+  if (jackson.jsonIgnore || fieldText.includes('@JsonIgnore')) {
+    const declarators = fieldNode.children.filter(
+      n => n.type === 'variable_declarator'
+    );
+
+    for (const decl of declarators) {
+      const fieldName = decl.childForFieldName('name')?.text;
+      if (fieldName && fieldName !== 'serialVersionUID') {
+        logger.debug(`Skipping @JsonIgnore field: ${fieldName}`);
+      }
+    }
+
     return fields;
   }
   
@@ -31,12 +73,8 @@ export function extractFields(
   
   // Get position for error reporting
   const position = getPosition(fieldNode);
-
-  //  // Collect annotation names for metadata
-  // const allAnnotationNames = findFieldAnnotations(fieldNode)
-  //   .map(getAnnotationName);
   
-  // Process each declarator (handles `private String a, b;`)
+  // Process each declarator
   const declarators = fieldNode.children.filter(
     n => n.type === 'variable_declarator'
   );

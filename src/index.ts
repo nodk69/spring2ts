@@ -1,10 +1,15 @@
 ﻿#!/usr/bin/env node
 
 import { Command } from 'commander';
-import { sync } from './cli/commands';
-import * as fs from 'fs';
-import * as path from 'path';
-import chalk from 'chalk';
+import {
+  InitService,
+  CheckService,
+  GenService,
+  SyncService,
+  ValidateService,
+  DetectService,
+  ParseService
+} from './services';
 
 const program = new Command();
 
@@ -20,83 +25,29 @@ program
   .option('-b, --backend <path>', 'Path to backend DTO folder')
   .option('-f, --frontend <path>', 'Output path for TypeScript types')
   .action(async (options) => {
-    const backendPath = options.backend || './backend/src/main/java';
-    const frontendPath = options.frontend || './src/types';
-    
-    console.log(chalk.green('🚀 Initializing Spring2TS v0.3.0...'));
-    console.log(chalk.blue(`   Backend: ${backendPath}`));
-    console.log(chalk.blue(`   Frontend: ${frontendPath}`));
-    
-    const config = {
-      backend: backendPath,
-      frontend: frontendPath,
-      failOnBreaking: true
-    };
-    
-    const configPath = path.join(process.cwd(), '.spring2tsrc.json');
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-    
-    console.log(chalk.green(`✅ Created ${configPath}`));
-    console.log(chalk.cyan('\n📋 Next steps:'));
-    console.log('  • Run `spring2ts check` to verify setup');
-    console.log('  • Run `spring2ts gen --dry-run` to preview changes');
-    console.log('  • Run `spring2ts gen --safe` to generate safely');
-    console.log('  • Add `spring2ts check` to your CI/CD');
-    console.log('');
-    
-    try {
-      await sync({ 
-        backend: backendPath, 
-        frontend: frontendPath,
-        failOnBreaking: false
-      });
-    } catch (error) {
-      console.error(chalk.red('Init failed:'), error);
+    const service = new InitService();
+    const result = await service.execute(options);
+    if (!result.success && result.exitCode) {
+      process.exit(result.exitCode);
     }
   });
 
 // spring2ts check
 program
   .command('check')
-  .description('Check for breaking changes (exits with code 3 if found)')
+  .description('Check for breaking changes and generated TypeScript errors')
   .option('-b, --backend <path>', 'Path to backend DTO folder')
+  .option('-f, --frontend <path>', 'Path to frontend source folder')
+  .option('--fail-on-breaking', 'Exit with code 3 on breaking changes')
   .action(async (options) => {
-    let backendPath = options.backend;
-    let configLoaded = false;
-    
-    if (!backendPath) {
-      try {
-        const configPath = path.join(process.cwd(), '.spring2tsrc.json');
-        if (fs.existsSync(configPath)) {
-          const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-          backendPath = config.backend;
-          configLoaded = true;
-        }
-      } catch {
-        // Ignore config errors
-      }
+    const service = new CheckService();
+    const result = await service.execute(options);
+    if (!result.success && result.exitCode) {
+      process.exit(result.exitCode);
     }
-    
-    if (!backendPath) {
-      console.error(chalk.red('❌ No backend path specified.'));
-      console.error(chalk.yellow('   Run `spring2ts init` first, or use --backend <path>'));
-      process.exit(1);
-    }
-    
-    if (configLoaded) {
-      console.log(chalk.gray(`📁 Using config: ${backendPath}`));
-    }
-    
-    console.log(chalk.cyan('🔍 Checking for breaking changes...'));
-    
-    await sync({ 
-      backend: backendPath, 
-      check: true, 
-      failOnBreaking: true 
-    });
   });
 
-// spring2ts gen (with --no-merge option)
+// spring2ts gen
 program
   .command('gen')
   .description('Generate TypeScript types')
@@ -105,59 +56,17 @@ program
   .option('--dry-run', 'Show what would be generated without writing files')
   .option('--backup', 'Backup existing types before generating')
   .option('--safe', 'Abort if breaking changes detected')
-  .option('--no-merge', 'Disable incremental updates (overwrite all files)')  // ✅ NEW
+  .option('--no-merge', 'Disable incremental updates (overwrite all files)')
+  .option('--incremental', 'Only regenerate files whose Java source changed')
   .action(async (options) => {
-    let backendPath = options.backend;
-    let frontendPath = options.frontend;
-    let configLoaded = false;
-    
-    try {
-      const configPath = path.join(process.cwd(), '.spring2tsrc.json');
-      if (fs.existsSync(configPath)) {
-        const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-        backendPath = backendPath || config.backend;
-        frontendPath = frontendPath || config.frontend;
-        configLoaded = true;
-      }
-    } catch {
-      // Ignore config errors
+    const service = new GenService();
+    const result = await service.execute(options);
+    if (!result.success && result.exitCode) {
+      process.exit(result.exitCode);
     }
-    
-    backendPath = backendPath || './backend/src/main/java';
-    frontendPath = frontendPath || './src/types';
-    
-    if (configLoaded) {
-      console.log(chalk.gray(`📁 Using config: ${backendPath} → ${frontendPath}`));
-    }
-    
-    if (options.dryRun) {
-      console.log(chalk.yellow('🔍 DRY RUN - No files will be written'));
-    }
-    if (options.backup) {
-      console.log(chalk.yellow('💾 Backup enabled - existing types will be backed up'));
-    }
-    if (options.safe) {
-      console.log(chalk.yellow('🛡️  Safe mode - will abort if breaking changes detected'));
-    }
-    if (!options.merge) {
-      console.log(chalk.yellow('⚠️  Merge disabled - files will be overwritten'));
-    }
-    
-    console.log(chalk.green('📝 Generating TypeScript types...'));
-    
-    await sync({ 
-      backend: backendPath, 
-      frontend: frontendPath,
-      check: false,
-      failOnBreaking: options.safe || false,
-      dryRun: options.dryRun || false,
-      backup: options.backup || false,
-      safe: options.safe || false,
-      merge: options.merge  
-    });
   });
 
-// spring2ts sync (with --no-merge option)
+// spring2ts sync
 program
   .command('sync')
   .description('Generate types and update baseline (accepts breaking changes)')
@@ -165,64 +74,42 @@ program
   .option('-f, --frontend <path>', 'Output path for TypeScript types')
   .option('--dry-run', 'Show what would change without writing files')
   .option('--backup', 'Backup existing types before generating')
-  .option('--no-merge', 'Disable incremental updates (overwrite all files)')  // ✅ NEW
+  .option('--no-merge', 'Disable incremental updates (overwrite all files)')
+  .option('--incremental', 'Only regenerate files whose Java source changed')
   .action(async (options) => {
-    let backendPath = options.backend;
-    let frontendPath = options.frontend;
-    
-    try {
-      const configPath = path.join(process.cwd(), '.spring2tsrc.json');
-      if (fs.existsSync(configPath)) {
-        const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-        backendPath = backendPath || config.backend;
-        frontendPath = frontendPath || config.frontend;
-      }
-    } catch {
-      // Ignore config errors
+    const service = new SyncService();
+    const result = await service.execute(options);
+    if (!result.success && result.exitCode) {
+      process.exit(result.exitCode);
     }
-    
-    backendPath = backendPath || './backend/src/main/java';
-    frontendPath = frontendPath || './src/types';
-    
-    if (options.dryRun) {
-      console.log(chalk.yellow('🔍 DRY RUN - No files will be written'));
-    }
-    if (!options.merge) {
-      console.log(chalk.yellow('⚠️  Merge disabled - files will be overwritten'));
-    }
-    
-    console.log(chalk.green('🔄 Syncing and updating baseline...'));
-    
-    await sync({ 
-      backend: backendPath, 
-      frontend: frontendPath,
-      check: false,
-      failOnBreaking: false,
-      dryRun: options.dryRun || false,
-      backup: options.backup || false,
-      isSyncMode: true,
-      merge: options.merge  
-    });
   });
 
-// spring2ts validate 
+// spring2ts validate
 program
   .command('validate')
-  .description('Validate generated types against runtime API')
+  .description('Validate that generated TypeScript compiles cleanly')
   .option('-b, --backend <path>', 'Path to backend DTO folder')
   .option('-u, --url <url>', 'Base URL of running backend')
+  .option('--validate-responses', 'Call GET APIs and compare live responses against DTOs and OpenAPI')
+  .option('--sample-size <number>', 'Number of array items to inspect per endpoint', (value) => parseInt(value, 10), 3)
+  .option('--timeout <seconds>', 'Timeout per request in seconds', (value) => parseInt(value, 10), 5)
+  .option('--include-auth', 'Include endpoints that require authentication')
+  .option('--endpoints <paths>', 'Comma-separated list of endpoints to validate')
   .action(async (options) => {
-    console.log(chalk.cyan('🔍 Validating types against runtime API...'));
-    console.log(chalk.yellow('⚠️  This feature is in development.'));
+    const service = new ValidateService();
+    const result = await service.execute(options);
+    if (!result.success && result.exitCode) {
+      process.exit(result.exitCode);
+    }
   });
 
-// spring2ts detect 
+// spring2ts detect
 program
   .command('detect')
   .description('Auto-detect project structure and existing types')
   .action(async () => {
-    console.log(chalk.cyan('🔍 Detecting project structure...'));
-    console.log(chalk.yellow('⚠️  This feature is in development.'));
+    const service = new DetectService();
+    await service.execute();
   });
 
 // Hidden debug command
@@ -231,7 +118,11 @@ program
   .description('Parse DTOs and output JSON (for debugging)')
   .option('-b, --backend <path>', 'Path to backend DTO folder')
   .action(async (options) => {
-    await sync({ ...options, frontend: undefined, check: false });
+    const service = new ParseService();
+    const result = await service.execute(options);
+    if (!result.success && result.exitCode) {
+      process.exit(result.exitCode);
+    }
   });
 
 // Show help if no command
